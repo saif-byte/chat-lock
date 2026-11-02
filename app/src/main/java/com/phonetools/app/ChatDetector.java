@@ -1,4 +1,4 @@
-package com.chatlock.app;
+package com.phonetools.app;
 
 import android.os.Build;
 import android.view.accessibility.AccessibilityEvent;
@@ -19,6 +19,18 @@ import java.util.Locale;
 public final class ChatDetector {
     public static final String INSTAGRAM = "com.instagram.android";
     public static final String X = "com.twitter.android";
+    public static final String SNAPCHAT = "com.snapchat.android";
+
+    public static boolean isTarget(String pkg) {
+        return INSTAGRAM.equals(pkg) || X.equals(pkg) || SNAPCHAT.equals(pkg);
+    }
+
+    public static String appName(String pkg) {
+        if (INSTAGRAM.equals(pkg)) return "Instagram";
+        if (X.equals(pkg)) return "X";
+        if (SNAPCHAT.equals(pkg)) return "Snapchat";
+        return pkg;
+    }
 
     /** Upper bound on nodes inspected per check, keeps CPU use tiny. */
     private static final int MAX_NODES = 350;
@@ -59,6 +71,29 @@ public final class ChatDetector {
             "new message",
     };
 
+    // Snapchat: the Chat page (friends feed) and an open conversation.
+    // The bottom bar's "Chat" tab is visible everywhere, so plain "chat" is never a screen marker.
+    private static final String[] SNAP_IDS = {
+            "chat_input",
+            "chat_message",
+            "chat_messages",
+            "chat_fragment",
+            "chat_list",
+            "chat_conversation",
+            "friends_feed",
+            "feed_list",
+            "ff_item",
+            "ff_list",
+            "feed_new_chat",
+    };
+    private static final String[] SNAP_ID_EXCLUDE = {"ngs_chat", "chat_icon", "chat_tab", "chat_badge"};
+    private static final String[] SNAP_TEXTS = {
+            "send a chat",
+            "new chat",
+            "chat with",
+            "start a new chat",
+    };
+
     private ChatDetector() {}
 
     /** Returns a short reason string if this is a chat screen, otherwise null. */
@@ -94,6 +129,8 @@ public final class ChatDetector {
     private static final String[] IG_TAP_IDS = {"action_bar_inbox_button", "direct_tab", "inbox_button", "direct_inbox"};
     private static final String[] IG_TAP_TEXTS = {"messenger", "direct", "message", "messages", "direct messages"};
     private static final String[] X_TAP_IDS = {"dms", "dm_tab", "messages_tab", "chat_tab"};
+    private static final String[] SNAP_TAP_IDS = {"ngs_chat_icon", "ngs_chat", "chat_tab"};
+    private static final String[] SNAP_TAP_TEXTS = {"chat", "chats", "chat tab"};
     private static final String[] X_TAP_TEXTS = {"messages", "direct messages", "chat", "chats", "message"};
 
     /**
@@ -101,9 +138,10 @@ public final class ChatDetector {
      * Only used to show an instant cover; the real check still decides.
      */
     public static boolean isInboxTap(String pkg, AccessibilityEvent e) {
-        boolean ig = INSTAGRAM.equals(pkg), x = X.equals(pkg);
-        if (!ig && !x) return false;
-        String[] texts = ig ? IG_TAP_TEXTS : X_TAP_TEXTS;
+        boolean ig = INSTAGRAM.equals(pkg), x = X.equals(pkg), snap = SNAPCHAT.equals(pkg);
+        if (!ig && !x && !snap) return false;
+        String[] texts = ig ? IG_TAP_TEXTS : (x ? X_TAP_TEXTS : SNAP_TAP_TEXTS);
+        String[] ids = ig ? IG_TAP_IDS : (x ? X_TAP_IDS : SNAP_TAP_IDS);
         if (matchesLabel(lower(e.getContentDescription()), texts)) return true;
         List<CharSequence> t = e.getText();
         if (t != null && t.size() == 1 && matchesLabel(lower(t.get(0)), texts)) return true;
@@ -115,7 +153,7 @@ public final class ChatDetector {
             String id = src.getViewIdResourceName();
             if (id != null) {
                 String name = id.substring(id.indexOf(":id/") + 4).toLowerCase(Locale.ROOT);
-                for (String m : ig ? IG_TAP_IDS : X_TAP_IDS) {
+                for (String m : ids) {
                     if (name.equals(m) || name.contains(m)) return true;
                 }
             }
@@ -149,6 +187,8 @@ public final class ChatDetector {
         String simple = lower.substring(lower.lastIndexOf('.') + 1);
         if (INSTAGRAM.equals(pkg)) {
             if (lower.contains(".direct.") || simple.startsWith("direct")) return "activity " + cls;
+        } else if (SNAPCHAT.equals(pkg)) {
+            if (simple.startsWith("chat") || simple.contains("conversation")) return "activity " + cls;
         } else if (X.equals(pkg)) {
             for (String seg : lower.split("\\.")) {
                 if (seg.equals("dm") || seg.equals("dms") || seg.equals("xchat") || seg.equals("chat")) {
@@ -185,6 +225,16 @@ public final class ChatDetector {
             String t = firstNonNull(lower(hintOf(n)), lower(n.getText()), lower(n.getContentDescription()));
             if (t != null && t.length() < 60) {
                 for (String m : X_TEXTS) if (t.equals(m) || t.startsWith(m)) return "text " + t;
+            }
+        }
+
+        if (SNAPCHAT.equals(pkg)) {
+            if (idName != null && !containsAny(idName, SNAP_ID_EXCLUDE)) {
+                for (String m : SNAP_IDS) if (idName.contains(m)) return "id " + idName;
+            }
+            String t = firstNonNull(lower(hintOf(n)), lower(n.getText()), lower(n.getContentDescription()));
+            if (t != null && t.length() < 40) {
+                for (String m : SNAP_TEXTS) if (t.equals(m) || t.startsWith(m + " ")) return "text " + t;
             }
         }
 

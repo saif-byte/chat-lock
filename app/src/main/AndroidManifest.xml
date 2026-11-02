@@ -16,6 +16,7 @@
         </intent>
         <package android:name="com.instagram.android" />
         <package android:name="com.twitter.android" />
+        <package android:name="com.snapchat.android" />
     </queries>
 
     <application
@@ -42,7 +43,7 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
-            android:taskAffinity="com.chatlock.app.lock"
+            android:taskAffinity="com.phonetools.app.lock"
             android:theme="@style/LockTheme" />
 
         <!-- Same lock screen, used to protect this app's own settings. -->
@@ -53,7 +54,7 @@
             android:theme="@style/LockTheme" />
 
         <service
-            android:name=".ChatLockService"
+            android:name=".GuardService"
             android:exported="true"
             android:label="@string/service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

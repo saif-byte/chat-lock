@@ -1,4 +1,4 @@
-package com.chatlock.app;
+package com.phonetools.app;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -59,14 +59,14 @@ public class LockActivity extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         // Our PIN screen is now on screen: drop the instant cover drawn by the service.
-        if (hasFocus) ChatLockService.onLockScreenVisible();
+        if (hasFocus) GuardService.onLockScreenVisible();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         updateLockoutMessage();
-        handler.postDelayed(ChatLockService::onLockScreenVisible, 500); // backup if focus is delayed
+        handler.postDelayed(GuardService::onLockScreenVisible, 500); // backup if focus is delayed
         if (!bioShownOnce && canUseBiometric()) {
             bioShownOnce = true;
             handler.postDelayed(this::showBiometric, 120);
@@ -97,11 +97,8 @@ public class LockActivity extends Activity {
         TextView lockIcon = text("🔒", 44, false);
         root.addView(lockIcon);
 
-        String title;
-        if (isSettingsMode()) title = "Chat Lock settings";
-        else if (ChatDetector.X.equals(pkg)) title = "X chats are locked";
-        else title = "Instagram chats are locked";
-        TextView t = text(title, 22, true);
+        // Deliberately generic: doesn't say which app or that chats are locked.
+        TextView t = text("Verify it's you", 22, true);
         t.setPadding(0, dp(12), 0, dp(4));
         root.addView(t);
 
@@ -160,7 +157,7 @@ public class LockActivity extends Activity {
         root.addView(ok);
 
         Button cancel = new Button(this, null, android.R.attr.borderlessButtonStyle);
-        cancel.setText(isSettingsMode() ? "Close" : "Leave chats");
+        cancel.setText(isSettingsMode() ? "Close" : "Exit");
         cancel.setOnClickListener(v -> cancel());
         root.addView(cancel);
 
@@ -234,7 +231,7 @@ public class LockActivity extends Activity {
         if (isSettingsMode()) {
             setResult(RESULT_OK);
         } else {
-            ChatLockService.onUnlocked(pkg);
+            GuardService.onUnlocked(pkg);
         }
         finish();
         overridePendingTransition(0, 0);
@@ -247,7 +244,7 @@ public class LockActivity extends Activity {
             finish();
             return;
         }
-        ChatLockService.onLockCancelled();
+        GuardService.onLockCancelled();
         Intent home = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -275,9 +272,7 @@ public class LockActivity extends Activity {
     private void showBiometric() {
         if (!canUseBiometric() || isLockedOut() || isFinishing()) return;
         BiometricPrompt.Builder b = new BiometricPrompt.Builder(this)
-                .setTitle("Unlock chats")
-                .setSubtitle(isSettingsMode() ? "Chat Lock settings"
-                        : (ChatDetector.X.equals(pkg) ? "X messages" : "Instagram messages"))
+                .setTitle("Verify it's you")
                 .setConfirmationRequired(false)
                 .setNegativeButton("Use PIN", getMainExecutor(), (d, w) -> {});
         if (Build.VERSION.SDK_INT >= 30) {

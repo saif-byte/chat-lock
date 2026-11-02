@@ -51,17 +51,17 @@ jobs:
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk ChatLock.apk
+        run: cp app/build/outputs/apk/release/app-release.apk PhoneTools.apk
 
       - name: Upload APK (Actions artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: ChatLock-apk
-          path: ChatLock.apk
+          name: PhoneTools-apk
+          path: PhoneTools.apk
 
       - name: Publish APK as a Release (easy phone download)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Chat Lock build ${{ github.run_number }}
-          files: ChatLock.apk
+          name: Phone Tools build ${{ github.run_number }}
+          files: PhoneTools.apk

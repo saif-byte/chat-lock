@@ -1,4 +1,4 @@
-package com.chatlock.app;
+package com.phonetools.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -93,8 +93,8 @@ public class MainActivity extends Activity {
         col.setPadding(p, p, p, dp(40));
         scroll.addView(col);
 
-        col.addView(header("Chat Lock", 26));
-        TextView sub = body("Locks only the chats/DMs inside Instagram and X. The rest of each app stays open.");
+        col.addView(header(getString(R.string.app_name), 26));
+        TextView sub = body("Locks only the chats/DMs inside Instagram, X and Snapchat. The rest of each app stays open.");
         col.addView(sub);
 
         // Step 1: PIN
@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
         serviceButton = button("Open Accessibility settings", v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-                Toast.makeText(this, "Tap “Chat Lock” (may be under Downloaded apps) and switch it on", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Tap “" + getString(R.string.service_label) + "” (may be under Downloaded apps) and switch it on", Toast.LENGTH_LONG).show();
             } catch (Exception ignored) {}
         });
         col.addView(serviceButton);
@@ -125,8 +125,9 @@ public class MainActivity extends Activity {
 
         // Step 3: options
         col.addView(section("3 · What to lock"));
-        col.addView(toggle("Lock Instagram chats", prefs.lockInstagram(), (c, on) -> { prefs.setLockInstagram(on); ChatLockService.refresh(); }));
-        col.addView(toggle("Lock X chats", prefs.lockX(), (c, on) -> { prefs.setLockX(on); ChatLockService.refresh(); }));
+        col.addView(toggle("Lock Instagram chats", prefs.lockInstagram(), (c, on) -> { prefs.setLockInstagram(on); GuardService.refresh(); }));
+        col.addView(toggle("Lock X chats", prefs.lockX(), (c, on) -> { prefs.setLockX(on); GuardService.refresh(); }));
+        col.addView(toggle("Lock Snapchat chats", prefs.lockSnapchat(), (c, on) -> { prefs.setLockSnapchat(on); GuardService.refresh(); }));
         col.addView(toggle("Allow fingerprint / face unlock", prefs.useBiometric(), (c, on) -> prefs.setUseBiometric(on)));
 
         col.addView(body("Lock again after leaving chats:"));
@@ -136,7 +137,7 @@ public class MainActivity extends Activity {
 
         // Advanced
         col.addView(section("If detection stops working"));
-        col.addView(body("Instagram and X change their apps often. Turn on test messages to see what Chat Lock detects as you move around the apps."));
+        col.addView(body("Instagram, X and Snapchat change their apps often. Turn on test messages to see what the app detects as you move around the apps."));
         col.addView(toggle("Show detection test messages", prefs.diagnostics(), (c, on) -> prefs.setDiagnostics(on)));
         col.addView(body("Extra words that mean “this is a chat screen” (comma-separated, matches view IDs or on-screen labels):"));
         EditText markers = new EditText(this);
@@ -169,7 +170,7 @@ public class MainActivity extends Activity {
     private boolean isServiceEnabled() {
         String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (enabled == null) return false;
-        ComponentName me = new ComponentName(this, ChatLockService.class);
+        ComponentName me = new ComponentName(this, GuardService.class);
         TextUtils.SimpleStringSplitter sp = new TextUtils.SimpleStringSplitter(':');
         sp.setString(enabled);
         while (sp.hasNext()) {
@@ -200,7 +201,7 @@ public class MainActivity extends Activity {
             if (!a.equals(b2)) { pin2.setError("PINs don't match"); return; }
             prefs.setPin(a);
             authed = true;
-            ChatLockService.refresh();
+            GuardService.refresh();
             refreshStatus();
             Toast.makeText(this, "PIN saved", Toast.LENGTH_SHORT).show();
             d.dismiss();

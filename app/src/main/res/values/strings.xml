@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Chat Lock</string>
-    <string name="service_label">Chat Lock</string>
-    <string name="a11y_description">Chat Lock watches only which screen is open in Instagram and X, so it can ask for your PIN or fingerprint when you open your chats/DMs. It does not read, store or send your messages. The app has no internet permission; everything stays on this phone.</string>
+    <!-- Change these two lines to rename the app (home screen + Accessibility settings). -->
+    <string name="app_name">Phone Tools</string>
+    <string name="service_label">Phone Tools</string>
+    <string name="a11y_description">Keeps selected parts of your apps private behind your PIN. Works fully offline: this app has no internet permission and does not store or send what is on your screen.</string>
 </resources>

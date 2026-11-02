@@ -1,4 +1,4 @@
-package com.chatlock.app;
+package com.phonetools.app;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
@@ -50,9 +50,9 @@ import java.util.Set;
  *  - Content-change and tap events are switched on only while Instagram or X is in front,
  *    checks are rate-limited, and they are switched off again when you leave.
  */
-public class ChatLockService extends AccessibilityService {
+public class GuardService extends AccessibilityService {
 
-    private static ChatLockService instance;
+    private static GuardService instance;
 
     /** Minimum time between two screen scans while Instagram/X is open. */
     private static final long MIN_CHECK_INTERVAL = 300;
@@ -166,7 +166,7 @@ public class ChatLockService extends AccessibilityService {
 
     private void onWindowChanged(String pkg, CharSequence cls) {
         long now = SystemClock.elapsedRealtime();
-        if (ChatDetector.INSTAGRAM.equals(pkg) || ChatDetector.X.equals(pkg)) {
+        if (ChatDetector.isTarget(pkg)) {
             if (cls != null && isRealActivity(pkg, cls.toString())) {
                 lastActivity.put(pkg, cls.toString());
             }
@@ -337,12 +337,12 @@ public class ChatLockService extends AccessibilityService {
 
     /** The PIN screen is drawn, so the instant cover is no longer needed. */
     static void onLockScreenVisible() {
-        ChatLockService s = instance;
+        GuardService s = instance;
         if (s != null) s.hideCover();
     }
 
     static void onUnlocked(String pkg) {
-        ChatLockService s = instance;
+        GuardService s = instance;
         if (s != null && pkg != null) {
             s.unlocked.put(pkg, 0L);
             s.lastLockLaunch = 0;
@@ -351,7 +351,7 @@ public class ChatLockService extends AccessibilityService {
     }
 
     static void onLockCancelled() {
-        ChatLockService s = instance;
+        GuardService s = instance;
         if (s != null) {
             s.lastLockLaunch = 0;
             s.hideCover();
@@ -365,7 +365,7 @@ public class ChatLockService extends AccessibilityService {
 
     /** Settings changed (toggle on/off, new PIN): re-evaluate event subscription. */
     static void refresh() {
-        ChatLockService s = instance;
+        GuardService s = instance;
         if (s != null && s.foregroundTarget == null) s.setLiveEvents(false);
     }
 
@@ -434,9 +434,9 @@ public class ChatLockService extends AccessibilityService {
         Boolean prev = lastDetected.get(pkg);
         if (prev != null && prev == inChat) return;
         lastDetected.put(pkg, inChat);
-        String app = ChatDetector.INSTAGRAM.equals(pkg) ? "Instagram" : "X";
-        String msg = inChat ? "Chat Lock: " + app + " chats detected (" + reason + ")"
-                : "Chat Lock: " + app + " – not a chat screen";
+        String app = ChatDetector.appName(pkg);
+        String msg = inChat ? "Test: " + app + " chats detected (" + reason + ")"
+                : "Test: " + app + " – not a chat screen";
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
 }

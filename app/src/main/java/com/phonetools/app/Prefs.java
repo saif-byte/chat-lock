@@ -1,4 +1,4 @@
-package com.chatlock.app;
+package com.phonetools.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -14,7 +14,7 @@ import javax.crypto.spec.PBEKeySpec;
 
 /** All settings live in private app storage on this phone only. The PIN is stored as a salted PBKDF2 hash. */
 public final class Prefs {
-    private static final String FILE = "chatlock";
+    private static final String FILE = "prefs";
     private static final int ITERATIONS = 12000;
     public static final int MAX_FAILS = 5;
     public static final long LOCKOUT_MS = 30_000L;
@@ -88,6 +88,9 @@ public final class Prefs {
     public boolean lockX() { return sp.getBoolean("lock_x", true); }
     public void setLockX(boolean v) { sp.edit().putBoolean("lock_x", v).apply(); }
 
+    public boolean lockSnapchat() { return sp.getBoolean("lock_snap", true); }
+    public void setLockSnapchat(boolean v) { sp.edit().putBoolean("lock_snap", v).apply(); }
+
     public boolean useBiometric() { return sp.getBoolean("biometric", true); }
     public void setUseBiometric(boolean v) { sp.edit().putBoolean("biometric", v).apply(); }
 
@@ -113,6 +116,7 @@ public final class Prefs {
     public boolean isTargetEnabled(String pkg) {
         if (ChatDetector.INSTAGRAM.equals(pkg)) return lockInstagram();
         if (ChatDetector.X.equals(pkg)) return lockX();
+        if (ChatDetector.SNAPCHAT.equals(pkg)) return lockSnapchat();
         return false;
     }
 

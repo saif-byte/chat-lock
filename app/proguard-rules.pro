@@ -1,2 +1,2 @@
 # Framework-only app; manifest-declared classes are kept automatically.
--keep class com.chatlock.app.ChatLockService { *; }
+-keep class com.phonetools.app.GuardService { *; }
