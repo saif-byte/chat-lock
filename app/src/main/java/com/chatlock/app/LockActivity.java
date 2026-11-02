@@ -52,15 +52,24 @@ public class LockActivity extends Activity {
         setIntent(intent);
         String p = intent.getStringExtra(EXTRA_PKG);
         if (p != null) pkg = p;
+        bioShownOnce = false;
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Our PIN screen is now on screen: drop the instant cover drawn by the service.
+        if (hasFocus) ChatLockService.onLockScreenVisible();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         updateLockoutMessage();
+        handler.postDelayed(ChatLockService::onLockScreenVisible, 500); // backup if focus is delayed
         if (!bioShownOnce && canUseBiometric()) {
             bioShownOnce = true;
-            handler.postDelayed(this::showBiometric, 150);
+            handler.postDelayed(this::showBiometric, 120);
         }
     }
 

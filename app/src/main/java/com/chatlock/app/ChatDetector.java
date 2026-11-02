@@ -1,6 +1,7 @@
 package com.chatlock.app;
 
 import android.os.Build;
+import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import java.util.ArrayDeque;
@@ -87,6 +88,59 @@ public final class ChatDetector {
             if (n != root) recycle(n);
         }
         return found;
+    }
+
+    // Buttons that open the inbox (tapped from the feed / tab bar).
+    private static final String[] IG_TAP_IDS = {"action_bar_inbox_button", "direct_tab", "inbox_button", "direct_inbox"};
+    private static final String[] IG_TAP_TEXTS = {"messenger", "direct", "message", "messages", "direct messages"};
+    private static final String[] X_TAP_IDS = {"dms", "dm_tab", "messages_tab", "chat_tab"};
+    private static final String[] X_TAP_TEXTS = {"messages", "direct messages", "chat", "chats", "message"};
+
+    /**
+     * Predicts a chat screen from a tap, before the new screen is even drawn.
+     * Only used to show an instant cover; the real check still decides.
+     */
+    public static boolean isInboxTap(String pkg, AccessibilityEvent e) {
+        boolean ig = INSTAGRAM.equals(pkg), x = X.equals(pkg);
+        if (!ig && !x) return false;
+        String[] texts = ig ? IG_TAP_TEXTS : X_TAP_TEXTS;
+        if (matchesLabel(lower(e.getContentDescription()), texts)) return true;
+        List<CharSequence> t = e.getText();
+        if (t != null && t.size() == 1 && matchesLabel(lower(t.get(0)), texts)) return true;
+
+        AccessibilityNodeInfo src = null;
+        try { src = e.getSource(); } catch (Exception ignored) {}
+        if (src == null) return false;
+        try {
+            String id = src.getViewIdResourceName();
+            if (id != null) {
+                String name = id.substring(id.indexOf(":id/") + 4).toLowerCase(Locale.ROOT);
+                for (String m : ig ? IG_TAP_IDS : X_TAP_IDS) {
+                    if (name.equals(m) || name.contains(m)) return true;
+                }
+            }
+            return matchesLabel(lower(src.getContentDescription()), texts);
+        } finally {
+            recycle(src);
+        }
+    }
+
+    /** Label equals a marker, or starts with it followed by a separator (e.g. "Messages, 2 unread"). */
+    private static boolean matchesLabel(String s, String[] markers) {
+        if (s == null || s.length() > 40) return false;
+        for (String m : markers) {
+            if (s.equals(m)) return true;
+            if (s.startsWith(m) && s.length() > m.length()) {
+                char c = s.charAt(m.length());
+                if (c == ',' || c == ' ' || c == '(' || c == '.') return true;
+            }
+        }
+        return false;
+    }
+
+    /** Cheap check using only the activity name (no screen scan). */
+    public static boolean isChatActivity(String pkg, String cls) {
+        return classSignal(pkg, cls) != null;
     }
 
     private static String classSignal(String pkg, String cls) {

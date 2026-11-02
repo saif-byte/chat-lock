@@ -9,14 +9,23 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
+import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.HashMap;
@@ -28,29 +37,42 @@ import java.util.Set;
 /**
  * Event-driven, no polling, no wake-locks, no foreground service, no network.
  *
+ * Speed design:
+ *  - An instant full-screen cover (accessibility overlay, no extra permission) is drawn
+ *    in the same frame a chat is detected, so chat content is never visible while the
+ *    PIN screen starts up.
+ *  - Tapping the Messages / inbox button shows the cover immediately, before the app
+ *    has even drawn the inbox. If it turns out not to be a chat, the cover goes away.
+ *  - Checks run at the first sign of a screen change (leading edge), not after a delay.
+ *
  * Battery design:
  *  - Normally only "window changed" events are delivered (a few per minute).
- *  - Only while Instagram or X is in front do we also ask for content-changed events,
- *    and those are throttled (one check at most every ~700 ms).
- *  - As soon as you leave Instagram/X, content events are switched off again.
+ *  - Content-change and tap events are switched on only while Instagram or X is in front,
+ *    checks are rate-limited, and they are switched off again when you leave.
  */
 public class ChatLockService extends AccessibilityService {
 
     private static ChatLockService instance;
 
-    private static final long STATE_CHECK_DELAY = 80;
-    private static final long CONTENT_CHECK_DELAY = 700;
+    /** Minimum time between two screen scans while Instagram/X is open. */
+    private static final long MIN_CHECK_INTERVAL = 300;
     /** Short grace so brief in-chat popups (image viewer, menus) don't re-prompt. */
     private static final long MIN_GRACE_MS = 3000;
     private static final long LOCK_RELAUNCH_GUARD_MS = 1500;
+    /** A predicted cover (from a tap) is removed after this if no chat appears. */
+    private static final long PREDICTED_COVER_MS = 1200;
+    /** Safety: never leave the cover up longer than this. */
+    private static final long MAX_COVER_MS = 4000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Prefs prefs;
+    private WindowManager wm;
 
     private String foregroundTarget;          // instagram / x package currently in front, or null
-    private boolean contentEventsOn;
+    private boolean liveEventsOn;
     private boolean checkPending;
     private String pendingPkg;
+    private long lastCheckAt;
 
     private final Map<String, String> lastActivity = new HashMap<>();
     private final Map<String, Boolean> activityCache = new HashMap<>();
@@ -58,6 +80,9 @@ public class ChatLockService extends AccessibilityService {
     private final Map<String, Long> unlocked = new HashMap<>();
     private final Map<String, Boolean> lastDetected = new HashMap<>();
     private long lastLockLaunch;
+
+    private View cover;
+    private boolean coverPredicted;
 
     private final Set<String> homePackages = new HashSet<>();
     private final Set<String> imePackages = new HashSet<>();
@@ -71,6 +96,8 @@ public class ChatLockService extends AccessibilityService {
     };
 
     private final Runnable checkRunnable = this::runCheck;
+    private final Runnable predictedCoverTimeout = () -> { if (coverPredicted) hideCover(); };
+    private final Runnable coverSafetyTimeout = this::hideCover;
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -79,6 +106,7 @@ public class ChatLockService extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         prefs = new Prefs(this);
+        wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         loadPackageSets();
         IntentFilter f = new IntentFilter(Intent.ACTION_SCREEN_OFF);
         if (Build.VERSION.SDK_INT >= 33) {
@@ -86,11 +114,12 @@ public class ChatLockService extends AccessibilityService {
         } else {
             registerReceiver(screenReceiver, f);
         }
-        setContentEvents(false);
+        setLiveEvents(false);
     }
 
     @Override
     public void onDestroy() {
+        hideCover();
         instance = null;
         handler.removeCallbacksAndMessages(null);
         try { unregisterReceiver(screenReceiver); } catch (Exception ignored) {}
@@ -115,11 +144,23 @@ public class ChatLockService extends AccessibilityService {
         if (!pkg.equals(foregroundTarget)) return;
         if (!prefs.hasPin() || !prefs.isTargetEnabled(pkg)) return;
 
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            handler.removeCallbacks(checkRunnable);
-            scheduleCheck(pkg, STATE_CHECK_DELAY);
-        } else if (!checkPending) {
-            scheduleCheck(pkg, CONTENT_CHECK_DELAY); // throttle, never starve
+        switch (type) {
+            case AccessibilityEvent.TYPE_VIEW_CLICKED:
+                // Tapped the inbox / Messages button: cover the screen right now.
+                if (!isUnlocked(pkg) && ChatDetector.isInboxTap(pkg, e)) {
+                    showCover(true);
+                    requestCheck(pkg, true);
+                }
+                break;
+            case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED:
+                // A chat Activity opened (e.g. X DMs, notification tap): lock without scanning.
+                if (!isUnlocked(pkg) && ChatDetector.isChatActivity(pkg, lastActivity.get(pkg))) {
+                    showLock(pkg);
+                }
+                requestCheck(pkg, true);
+                break;
+            default:
+                requestCheck(pkg, false);
         }
     }
 
@@ -131,7 +172,7 @@ public class ChatLockService extends AccessibilityService {
             }
             if (!pkg.equals(foregroundTarget)) {
                 foregroundTarget = pkg;
-                setContentEvents(prefs.isTargetEnabled(pkg) && prefs.hasPin());
+                setLiveEvents(prefs.isTargetEnabled(pkg) && prefs.hasPin());
             }
             return;
         }
@@ -143,26 +184,36 @@ public class ChatLockService extends AccessibilityService {
             foregroundTarget = null;
             handler.removeCallbacks(checkRunnable);
             checkPending = false;
-            setContentEvents(false);
+            hideCover();
+            setLiveEvents(false);
         }
     }
 
-    private void scheduleCheck(String pkg, long delay) {
+    /** Leading-edge throttle: scan right away, then at most every MIN_CHECK_INTERVAL. */
+    private void requestCheck(String pkg, boolean urgent) {
         pendingPkg = pkg;
+        long now = SystemClock.elapsedRealtime();
+        long wait = Math.max(0, lastCheckAt + MIN_CHECK_INTERVAL - now);
+        if (urgent) {
+            handler.removeCallbacks(checkRunnable);
+            wait = 0;
+        } else if (checkPending) {
+            return;
+        }
         checkPending = true;
-        handler.postDelayed(checkRunnable, delay);
+        if (wait == 0) handler.postAtFrontOfQueue(checkRunnable);
+        else handler.postDelayed(checkRunnable, wait);
     }
 
     private void runCheck() {
         checkPending = false;
+        lastCheckAt = SystemClock.elapsedRealtime();
         String pkg = pendingPkg;
         if (pkg == null || !pkg.equals(foregroundTarget)) return;
 
-        AccessibilityNodeInfo root;
-        try { root = getRootInActiveWindow(); } catch (Exception ex) { return; }
+        AccessibilityNodeInfo root = findAppRoot(pkg);
         if (root == null) return;
         try {
-            if (root.getPackageName() == null || !pkg.equals(root.getPackageName().toString())) return;
             String reason = ChatDetector.detect(pkg, lastActivity.get(pkg), root, prefs.extraMarkers());
             boolean inChat = reason != null;
             diagnostics(pkg, inChat, reason);
@@ -174,6 +225,7 @@ public class ChatLockService extends AccessibilityService {
                     long grace = Math.max(MIN_GRACE_MS, prefs.relockDelayMs());
                     if (leftAt == 0L || now - leftAt <= grace) {
                         unlocked.put(pkg, 0L);     // still within unlocked session
+                        hideCover();
                         return;
                     }
                     unlocked.remove(pkg);          // session expired
@@ -187,7 +239,32 @@ public class ChatLockService extends AccessibilityService {
         }
     }
 
+    /** Root of the app's own window (the instant cover can be the "active" window). */
+    private AccessibilityNodeInfo findAppRoot(String pkg) {
+        try {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r != null && r.getPackageName() != null && pkg.equals(r.getPackageName().toString())) return r;
+            ChatDetector.recycle(r);
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo wr = w.getRoot();
+                if (wr != null && wr.getPackageName() != null && pkg.equals(wr.getPackageName().toString())) return wr;
+                ChatDetector.recycle(wr);
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private boolean isUnlocked(String pkg) {
+        Long leftAt = unlocked.get(pkg);
+        if (leftAt == null) return false;
+        if (leftAt == 0L) return true;
+        long grace = Math.max(MIN_GRACE_MS, prefs.relockDelayMs());
+        return SystemClock.elapsedRealtime() - leftAt <= grace;
+    }
+
     private void showLock(String pkg) {
+        showCover(false);                          // same frame: hide the chat instantly
         long now = SystemClock.elapsedRealtime();
         if (now - lastLockLaunch < LOCK_RELAUNCH_GUARD_MS) return;
         lastLockLaunch = now;
@@ -199,13 +276,77 @@ public class ChatLockService extends AccessibilityService {
         startActivity(i);
     }
 
+    // ------------------------------------------------------------------ instant cover
+
+    private void showCover(boolean predicted) {
+        if (wm == null) return;
+        if (cover != null) {
+            if (!predicted) {                      // a real detection upgrades a predicted cover
+                coverPredicted = false;
+                handler.removeCallbacks(predictedCoverTimeout);
+            }
+            return;
+        }
+        boolean dark = (getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        FrameLayout v = new FrameLayout(this);
+        v.setBackgroundColor(dark ? 0xFF121212 : 0xFFFAFAFA);
+        TextView icon = new TextView(this);
+        icon.setText("🔒");
+        icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 44);
+        v.addView(icon, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        v.setOnTouchListener((view, ev) -> true); // swallow touches so nothing behind can be used
+
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.OPAQUE);
+        lp.windowAnimations = 0;
+        if (Build.VERSION.SDK_INT >= 30) {
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        } else {
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+        try {
+            wm.addView(v, lp);
+            cover = v;
+            coverPredicted = predicted;
+            if (predicted) handler.postDelayed(predictedCoverTimeout, PREDICTED_COVER_MS);
+            handler.postDelayed(coverSafetyTimeout, MAX_COVER_MS);
+        } catch (Exception ex) {
+            cover = null;
+        }
+    }
+
+    private void hideCover() {
+        handler.removeCallbacks(predictedCoverTimeout);
+        handler.removeCallbacks(coverSafetyTimeout);
+        if (cover != null && wm != null) {
+            try { wm.removeViewImmediate(cover); } catch (Exception ignored) {}
+        }
+        cover = null;
+        coverPredicted = false;
+    }
+
     // ------------------------------------------------------------------ called by LockActivity
+
+    /** The PIN screen is drawn, so the instant cover is no longer needed. */
+    static void onLockScreenVisible() {
+        ChatLockService s = instance;
+        if (s != null) s.hideCover();
+    }
 
     static void onUnlocked(String pkg) {
         ChatLockService s = instance;
         if (s != null && pkg != null) {
             s.unlocked.put(pkg, 0L);
             s.lastLockLaunch = 0;
+            s.hideCover();
         }
     }
 
@@ -213,6 +354,7 @@ public class ChatLockService extends AccessibilityService {
         ChatLockService s = instance;
         if (s != null) {
             s.lastLockLaunch = 0;
+            s.hideCover();
             s.performGlobalAction(GLOBAL_ACTION_HOME);
         }
     }
@@ -224,21 +366,24 @@ public class ChatLockService extends AccessibilityService {
     /** Settings changed (toggle on/off, new PIN): re-evaluate event subscription. */
     static void refresh() {
         ChatLockService s = instance;
-        if (s != null && s.foregroundTarget == null) s.setContentEvents(false);
+        if (s != null && s.foregroundTarget == null) s.setLiveEvents(false);
     }
 
     // ------------------------------------------------------------------ helpers
 
-    private void setContentEvents(boolean on) {
+    private void setLiveEvents(boolean on) {
         AccessibilityServiceInfo info = getServiceInfo();
         if (info == null) return;
         int wanted = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                | (on ? AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED : 0);
-        if (info.eventTypes != wanted) {
+                | (on ? AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                        | AccessibilityEvent.TYPE_VIEW_CLICKED : 0);
+        long timeout = on ? 100 : 300;
+        if (info.eventTypes != wanted || info.notificationTimeout != timeout) {
             info.eventTypes = wanted;
+            info.notificationTimeout = timeout;
             setServiceInfo(info);
         }
-        contentEventsOn = on;
+        liveEventsOn = on;
     }
 
     private boolean isRealActivity(String pkg, String cls) {
