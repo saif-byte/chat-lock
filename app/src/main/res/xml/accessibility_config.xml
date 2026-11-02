@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Battery note: by default the service only listens for window changes (app switches,
+  a few per minute). Detailed screen-content events are switched on in code only while
+  Instagram or X is in the foreground, and switched off again when you leave.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="400"
+    android:isAccessibilityTool="false"
+    android:description="@string/a11y_description" />

@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Optional release signing. Set these as GitHub secrets (see README) so every
+// build is signed with the same key and you can update without uninstalling.
+def ksFile = System.getenv("KEYSTORE_FILE")
+def hasReleaseKey = ksFile != null && new File(ksFile).exists()
+
+android {
+    namespace 'com.chatlock.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.chatlock.app"
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKey) {
+                storeFile file(ksFile)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // Don't embed Google's encrypted dependency-metadata block in the APK.
+    dependenciesInfo {
+        includeInApk false
+        includeInBundle false
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+// No dependencies at all: only the Android framework. Nothing third-party ships in the APK.
+dependencies {
+}

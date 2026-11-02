@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Chat Lock</string>
+    <string name="service_label">Chat Lock</string>
+    <string name="a11y_description">Chat Lock watches only which screen is open in Instagram and X, so it can ask for your PIN or fingerprint when you open your chats/DMs. It does not read, store or send your messages. The app has no internet permission; everything stays on this phone.</string>
+</resources>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- chat bubble -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,34 h48 a6,6 0 0 1 6,6 v26 a6,6 0 0 1 -6,6 h-30 l-10,9 v-9 h-8 a6,6 0 0 1 -6,-6 v-26 a6,6 0 0 1 6,-6 z" />
+    <!-- lock shackle -->
+    <path
+        android:strokeColor="#6C4DF6"
+        android:strokeWidth="4"
+        android:fillColor="#00000000"
+        android:pathData="M47,52 v-5 a7,7 0 0 1 14,0 v5" />
+    <!-- lock body -->
+    <path
+        android:fillColor="#6C4DF6"
+        android:pathData="M43,52 h22 a2,2 0 0 1 2,2 v12 a2,2 0 0 1 -2,2 h-22 a2,2 0 0 1 -2,-2 v-12 a2,2 0 0 1 2,-2 z" />
+</vector>
