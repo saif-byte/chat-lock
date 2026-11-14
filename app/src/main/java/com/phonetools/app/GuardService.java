@@ -56,8 +56,6 @@ public class GuardService extends AccessibilityService {
 
     /** Minimum time between two screen scans while Instagram/X is open. */
     private static final long MIN_CHECK_INTERVAL = 300;
-    /** Short grace so brief in-chat popups (image viewer, menus) don't re-prompt. */
-    private static final long MIN_GRACE_MS = 3000;
     private static final long LOCK_RELAUNCH_GUARD_MS = 1500;
     /** A predicted cover (from a tap) is removed after this if no chat appears. */
     private static final long PREDICTED_COVER_MS = 1200;
@@ -76,7 +74,11 @@ public class GuardService extends AccessibilityService {
 
     private final Map<String, String> lastActivity = new HashMap<>();
     private final Map<String, Boolean> activityCache = new HashMap<>();
-    /** pkg -> time we stopped being in its chats (0 = currently in chats). Present only while unlocked. */
+    /**
+     * Unlock sessions. pkg -> 0 while the app is open and unlocked, or the time you left the app.
+     * Moving around inside the app (chat -> reel -> back) never ends the session; leaving the
+     * app (home screen, recent apps, another app) or turning the screen off does.
+     */
     private final Map<String, Long> unlocked = new HashMap<>();
     private final Map<String, Boolean> lastDetected = new HashMap<>();
     private long lastLockLaunch;
@@ -171,15 +173,17 @@ public class GuardService extends AccessibilityService {
                 lastActivity.put(pkg, cls.toString());
             }
             if (!pkg.equals(foregroundTarget)) {
+                if (foregroundTarget != null) markLeft(foregroundTarget, now);   // e.g. Instagram -> Snapchat
                 foregroundTarget = pkg;
+                // Coming back: keep the session only if within the chosen relock delay.
+                if (isUnlocked(pkg)) unlocked.put(pkg, 0L); else unlocked.remove(pkg);
                 setLiveEvents(prefs.isTargetEnabled(pkg) && prefs.hasPin());
             }
             return;
         }
-        if (foregroundTarget != null && isLeavingApp(pkg)) {
-            // You switched to the home screen or another app.
-            Long t = unlocked.get(foregroundTarget);
-            if (t != null && t == 0L) unlocked.put(foregroundTarget, now);
+        if (foregroundTarget != null && isLeavingApp(pkg, cls)) {
+            // You switched to the home screen, recent apps or another app.
+            markLeft(foregroundTarget, now);
             lastDetected.remove(foregroundTarget);
             foregroundTarget = null;
             handler.removeCallbacks(checkRunnable);
@@ -218,21 +222,14 @@ public class GuardService extends AccessibilityService {
             boolean inChat = reason != null;
             diagnostics(pkg, inChat, reason);
 
-            long now = SystemClock.elapsedRealtime();
-            Long leftAt = unlocked.get(pkg);
             if (inChat) {
-                if (leftAt != null) {
-                    long grace = Math.max(MIN_GRACE_MS, prefs.relockDelayMs());
-                    if (leftAt == 0L || now - leftAt <= grace) {
-                        unlocked.put(pkg, 0L);     // still within unlocked session
-                        hideCover();
-                        return;
-                    }
-                    unlocked.remove(pkg);          // session expired
+                if (isUnlocked(pkg)) {
+                    unlocked.put(pkg, 0L);         // still in the same unlocked session
+                    hideCover();
+                } else {
+                    unlocked.remove(pkg);
+                    showLock(pkg);
                 }
-                showLock(pkg);
-            } else if (leftAt != null && leftAt == 0L) {
-                unlocked.put(pkg, now);            // left chats, start grace timer
             }
         } finally {
             ChatDetector.recycle(root);
@@ -259,8 +256,12 @@ public class GuardService extends AccessibilityService {
         Long leftAt = unlocked.get(pkg);
         if (leftAt == null) return false;
         if (leftAt == 0L) return true;
-        long grace = Math.max(MIN_GRACE_MS, prefs.relockDelayMs());
-        return SystemClock.elapsedRealtime() - leftAt <= grace;
+        return SystemClock.elapsedRealtime() - leftAt <= prefs.relockDelayMs();
+    }
+
+    private void markLeft(String pkg, long now) {
+        Long t = unlocked.get(pkg);
+        if (t != null && t == 0L) unlocked.put(pkg, now);
     }
 
     private void showLock(String pkg) {
@@ -376,7 +377,8 @@ public class GuardService extends AccessibilityService {
         if (info == null) return;
         int wanted = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 | (on ? AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-                        | AccessibilityEvent.TYPE_VIEW_CLICKED : 0);
+                        | AccessibilityEvent.TYPE_VIEW_CLICKED
+                        | AccessibilityEvent.TYPE_VIEW_SCROLLED : 0);   // swipes between Snapchat pages
         long timeout = on ? 100 : 300;
         if (info.eventTypes != wanted || info.notificationTimeout != timeout) {
             info.eventTypes = wanted;
@@ -401,9 +403,12 @@ public class GuardService extends AccessibilityService {
     }
 
     /** True if a window from this package means the user left Instagram/X. */
-    private boolean isLeavingApp(String pkg) {
+    private boolean isLeavingApp(String pkg, CharSequence cls) {
         if (pkg.equals(getPackageName())) return false;          // our own lock screen
-        if (pkg.equals("com.android.systemui")) return false;    // notification shade, biometric dialog
+        if (pkg.equals("com.android.systemui")) {
+            // Recent-apps screen on phones where System UI draws it (swipe-to-kill happens here).
+            return cls != null && cls.toString().toLowerCase(java.util.Locale.ROOT).contains("recent");
+        }                                                        // otherwise: notification shade, biometric dialog
         if (pkg.equals("android")) return false;                 // system dialogs
         if (imePackages.contains(pkg)) return false;             // keyboard
         if (homePackages.contains(pkg)) return true;             // launcher

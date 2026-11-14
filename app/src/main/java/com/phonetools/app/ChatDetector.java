@@ -1,5 +1,6 @@
 package com.phonetools.app;
 
+import android.graphics.Rect;
 import android.os.Build;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -9,7 +10,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Decides whether the screen currently shown by Instagram / X is a chat (DM) screen.
+ * Decides whether the screen currently shown by Instagram / X / Snapchat is a chat (DM) screen.
  * It looks at three cheap signals, in order:
  *   1. the name of the current Activity (e.g. X opens DMs in their own Activity),
  *   2. internal view IDs of the visible screen (e.g. Instagram's thread composer),
@@ -32,10 +33,9 @@ public final class ChatDetector {
         return pkg;
     }
 
-    /** Upper bound on nodes inspected per check, keeps CPU use tiny. */
-    private static final int MAX_NODES = 350;
+    /** Upper bound on nodes inspected per check. Big enough for Snapchat's deep screens. */
+    private static final int MAX_NODES = 3000;
 
-    // Instagram: view-id fragments that only exist on the inbox or a chat thread.
     private static final String[] IG_IDS = {
             "row_thread_composer",
             "thread_composer",
@@ -71,8 +71,7 @@ public final class ChatDetector {
             "new message",
     };
 
-    // Snapchat: the Chat page (friends feed) and an open conversation.
-    // The bottom bar's "Chat" tab is visible everywhere, so plain "chat" is never a screen marker.
+    // Snapchat: open conversation.
     private static final String[] SNAP_IDS = {
             "chat_input",
             "chat_message",
@@ -81,17 +80,17 @@ public final class ChatDetector {
             "chat_list",
             "chat_conversation",
             "friends_feed",
-            "feed_list",
             "ff_item",
             "ff_list",
             "feed_new_chat",
     };
-    private static final String[] SNAP_ID_EXCLUDE = {"ngs_chat", "chat_icon", "chat_tab", "chat_badge"};
-    private static final String[] SNAP_TEXTS = {
-            "send a chat",
-            "new chat",
-            "chat with",
-            "start a new chat",
+    private static final String[] SNAP_ID_EXCLUDE = {"ngs_", "chat_icon", "chat_tab", "chat_badge"};
+    private static final String[] SNAP_TEXTS = {"send a chat", "start a new chat", "chat with"};
+    // Snapchat: status words shown on every row of the Chat list (friends feed).
+    private static final String[] SNAP_FEED_STATUS = {
+            "new chat", "new snap", "new chats", "new snaps", "received", "opened", "delivered",
+            "sent", "replayed", "screenshotted", "tap to chat", "tap to view", "typing",
+            "missed call", "called", "saved in chat", "pending",
     };
 
     private ChatDetector() {}
@@ -103,15 +102,27 @@ public final class ChatDetector {
         if (byClass != null) return byClass;
         if (root == null) return null;
 
+        boolean snap = SNAPCHAT.equals(pkg);
+        Rect rootBounds = new Rect();
+        root.getBoundsInScreen(rootBounds);
+        int topZone = rootBounds.top + Math.max(1, rootBounds.height()) / 5;   // top 20% of the window
+        Rect r = new Rect();
+        int feedRows = 0;
+
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(root);
         int seen = 0;
         String found = null;
         while (!queue.isEmpty()) {
             AccessibilityNodeInfo n = queue.poll();
-            if (found == null && seen < MAX_NODES) {
+            // Skip anything off screen (e.g. Snapchat keeps neighbouring pages in memory).
+            if (found == null && seen < MAX_NODES && (n == root || n.isVisibleToUser())) {
                 seen++;
                 found = nodeSignal(pkg, n, extraMarkers);
+                if (found == null && snap) {
+                    found = snapSignal(n, topZone, r);
+                    if (found == null && isSnapFeedRow(n) && ++feedRows >= 2) found = "chat list";
+                }
                 if (found == null) {
                     int c = n.getChildCount();
                     for (int i = 0; i < c; i++) {
@@ -123,6 +134,47 @@ public final class ChatDetector {
             if (n != root) recycle(n);
         }
         return found;
+    }
+
+    /** Snapchat-only signals that need position or state. */
+    private static String snapSignal(AccessibilityNodeInfo n, int topZone, Rect r) {
+        String text = lower(n.getText());
+        String desc = lower(n.getContentDescription());
+        String hint = lower(hintOf(n));
+        // Message box of an open conversation.
+        if (n.isEditable()) {
+            for (String t : new String[]{hint, text, desc}) {
+                if (t != null && (t.equals("chat") || t.startsWith("send a chat") || t.startsWith("chat "))) {
+                    return "message box";
+                }
+            }
+        }
+        // "Chat" page title at the top of the screen (the tab label sits at the bottom instead).
+        String label = text != null ? text : desc;
+        if (label != null && (label.equals("chat") || label.equals("chats"))) {
+            n.getBoundsInScreen(r);
+            if (r.bottom <= topZone && r.height() > 0) return "chat page title";
+        }
+        // Bottom bar with the Chat tab selected.
+        String id = n.getViewIdResourceName();
+        if (n.isSelected() && ((id != null && id.toLowerCase(Locale.ROOT).contains("chat"))
+                || "chat".equals(desc) || "chats".equals(desc))) {
+            return "chat tab selected";
+        }
+        return null;
+    }
+
+    /** A row of Snapchat's Chat list, e.g. "Ali, New Chat · 2m" or "Opened · 1d". */
+    private static boolean isSnapFeedRow(AccessibilityNodeInfo n) {
+        String t = firstNonNull(lower(n.getText()), lower(n.getContentDescription()));
+        if (t == null || t.length() > 120) return false;
+        for (String part : t.split("[·•,|\\n]")) {
+            String p = part.trim();
+            for (String st : SNAP_FEED_STATUS) {
+                if (p.equals(st) || p.startsWith(st + " ")) return true;
+            }
+        }
+        return false;
     }
 
     // Buttons that open the inbox (tapped from the feed / tab bar).

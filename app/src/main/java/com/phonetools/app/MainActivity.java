@@ -130,10 +130,10 @@ public class MainActivity extends Activity {
         col.addView(toggle("Lock Snapchat chats", prefs.lockSnapchat(), (c, on) -> { prefs.setLockSnapchat(on); GuardService.refresh(); }));
         col.addView(toggle("Allow fingerprint / face unlock", prefs.useBiometric(), (c, on) -> prefs.setUseBiometric(on)));
 
-        col.addView(body("Lock again after leaving chats:"));
+        col.addView(body("Lock again after leaving the app:"));
         delayButton = button(delayLabel(), v -> chooseDelay());
         col.addView(delayButton);
-        col.addView(body("Chats always lock again when the screen turns off."));
+        col.addView(body("Moving around inside the app (e.g. opening a reel from a chat) keeps chats unlocked. They lock again when you leave the app, kill it, or turn the screen off."));
 
         // Advanced
         col.addView(section("If detection stops working"));
@@ -213,7 +213,7 @@ public class MainActivity extends Activity {
         int cur = 0;
         for (int i = 0; i < DELAYS.length; i++) if (DELAYS[i] == prefs.relockDelayMs()) cur = i;
         new AlertDialog.Builder(this)
-                .setTitle("Lock again after leaving chats")
+                .setTitle("Lock again after leaving the app")
                 .setSingleChoiceItems(DELAY_LABELS, cur, (d, which) -> {
                     prefs.setRelockDelayMs(DELAYS[which]);
                     delayButton.setText(delayLabel());

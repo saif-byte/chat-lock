@@ -42,7 +42,8 @@ Keep that text file private and **never** upload it into the repo itself.
 
 ### How locking behaves
 - Unlocking keeps chats open while you're in them.
-- Leaving chats (to the feed, home screen, or another app) locks them again – immediately by default, or after 30 s / 1 min / 5 min if you choose.
+- Moving around inside the app (e.g. opening a reel from a chat and coming back) keeps chats unlocked.
+- Leaving the app (home screen, recent apps, another app) or killing it locks chats again – immediately by default, or after 30 s / 1 min / 5 min if you choose.
 - Turning the screen off always locks again.
 - Opening a chat from a notification also shows the lock.
 - 5 wrong PINs → 30-second wait.
